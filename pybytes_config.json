@@ -1,0 +1,13 @@
+{"wifi": {"ssid": "", "password": ""},
+         "wlan_antenna": 0,
+         "dump_ca": "FALSE",
+         "cfg_msg": "NULL",
+         "server": "",
+         "ssl": "FALSE",
+         "lte": {"apn": "NULL", "cid": 1, "reset": "FALSE", "carrier": "NULL", "band": "NULL", "type": "NULL"},
+         "device_id": "",
+         "network_preferences": [],
+         "ota_server": {"port": 443, "domain": "software.pycom.io"},
+         "pybytes_autostart": "FALSE",
+         "username": ""
+}

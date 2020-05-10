@@ -1,0 +1,2 @@
+# exclude config.py file (as it contains authentication info)
+config_auth.py
