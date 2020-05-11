@@ -1,0 +1,10 @@
+{
+    "dev-packages": [
+        "micropy-cli"
+    ],
+    "packages": [
+        "network",
+        "mqtt",
+        "machine"
+    ]
+}
