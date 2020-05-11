@@ -23,7 +23,7 @@ If using Node-Red and Mosquitto, you can use a Docker Compose file defining the 
 ```
 version: '3'
 services:
-    //############### Node Red
+    ############### Node Red
     node-red:
         container_name: node-red
         image: nodered/node-red
@@ -33,7 +33,7 @@ services:
         ports:
             - "1880:1880"
     
-    //############### Mosquitto MQTT
+    ############### Mosquitto MQTT
     mqtt:
         container_name: mqtt
         image: eclipse-mosquitto
@@ -50,9 +50,9 @@ services:
 
 Moving on to the code, there was one file ommitted from the repository which is needed to define configuration details. Create a new file in the base work directory named config_auth.py. Here is where all of your personal credentials are stored for network connection, MQTT server, etc. Fill in the applicable constant variables matching your network and MQTT settings:
 
-```
-########## config_auth.py:
-########## Secret keys and authentication information for networks, mqtt servers, etc
+```python
+# config_auth.py:
+# Secret keys and authentication information for networks, mqtt servers, etc
 
 #Network credentials
 NETWORK_1_PASS = "XXXX"
