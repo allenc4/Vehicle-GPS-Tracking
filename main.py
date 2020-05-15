@@ -11,22 +11,25 @@ from network import WLAN
 from config import ConfigMqtt, ConfigAccelerometer, ConfigGPS
 from pycoproc import WAKE_REASON_ACCELEROMETER
 from LIS2HH12 import LIS2HH12
-from L76GNSS import L76GNSS
+#from L76GNSS import L76GNSS
+from lib.L76GNSV4 import L76GNSS
 from pytrack import Pytrack
 
 # Declare global variables and instantiate various modules
 py = Pytrack()
 accel = LIS2HH12()
 wlan = WLAN() #TODO Change to LTE
+debug = True
 
-
-# Initialize local variables used within the script. Checks for network connectivity. If not able to connect after
-# a timeout, resets the machine in order to try and conenct again. Also initializes MQTTClient
-# Return: Object with the initialized variable properties
-# {
-#   'mqttClient': initializedMqttClientInstance
-# }
-def init(mqttClient):
+def init():
+    '''
+    Initialize local variables used within the script. Checks for network connectivity. If not able to connect after
+    a timeout, resets the machine in order to try and conenct again. Also initializes MQTTClient
+    Return: Object with the initialized variable properties
+    {
+      'mqttClient': initializedMqttClientInstance
+    }
+    '''
      # Check if network is connected. If not, attempt to connect
     counter = 0
     while not wlan.isconnected():
@@ -44,6 +47,12 @@ def init(mqttClient):
     }
 
 def sendMQTTMessage(topic, msg, mqttClient=None):
+    '''
+    Sends an MQTT message to the specified topic
+    topic - Topic to send to
+    msg - Message to send to topic
+    mqttClient - MQTT Client used to send the message. If not defined, sends to default configured mqtt client in configuration
+    '''
     try:
         if mqttClient is None:
             # Instantiate a new MQTTClient
@@ -67,6 +76,10 @@ def sendMQTTMessage(topic, msg, mqttClient=None):
 
 
 def sleepWithInterrupt(mqttClient=None):
+    '''
+    Puts the py to deepsleep, enabling accelerometer and timer interrupt for wake
+    mqttClient - If defined, sends disconnect request
+    '''
     # Enable wakeup source from INT pin
     py.setup_int_pin_wake_up(False)
 
@@ -89,23 +102,64 @@ def sleepWithInterrupt(mqttClient=None):
     py.go_to_sleep()
 
 
-def monitorLocation(bWithMotion=True, mqttClient=None):
-    # Sends GPS location to Mqtt topic. Continues sending data as long as motion is detected
-    # Params:
-    #   bWithMotion - If true, continues to monitor and send GPS location to topic as long as 
-    #                 accelerometer activity is detected. If false, only publishes location once
-    print("Monitoring Location")
-    gps = L76GNSS(py)
-    while True:
-        coordinates = gps.coordinates(debug=True)
-        print(coordinates)
+def _getGpsFix(gps):
+    '''
+    Attempts to lock on a signal to the gps.
+    Returns true if signal is found, false otherwise
+    '''
+    input("Press any key to continue....")  #TODO - remove
+    # Attempt to get the gps lock for X number of attempts (defined in config)
+    signalFixTries = max(ConfigGPS.LOCK_FAIL_ATTEMPTS, 1)
+    while signalFixTries > 0:
+        signalFixTries -= 1
+        gps.get_fix(debug=False)
+        pycom.heartbeat(False)
+        if gps.fixed():
+            # Got the GPS fix, exit out of this while condition
+            pycom.rgbled(0x000f00)
+            return True
+        else:
+            # If couldnt get a signal fix, try again
+            pycom.rgbled(0x0f0000)
+    return False
 
+def monitorLocation(bWithMotion=True, mqttClient=None):
+    '''
+    Sends GPS location to Mqtt topic. Continues sending data as long as motion is detected
+    bWithMotion - If true, continues to monitor and send GPS location to topic as long as accelerometer activity is
+        detected. If false, only publishes location once
+    mqttClient - MQTT Client to use to send messages to. If not defined, uses default client specified in config
+    '''
+    printDebug("Monitoring Location")
+    gps = L76GNSS(py, debug=False)
+    gps.setAlwaysOn()
+
+    if not _getGpsFix(gps):
+        # Couldnt get a signal so send message to topic for gps not available and exit (go back to sleep)
+        printDebug("Couldnt get a GPS signal after {} attempts".format(ConfigGPS.LOCK_FAIL_ATTEMPTS))
+        sendMQTTMessage(ConfigMqtt.TOPIC_GPS_NOT_AVAILABLE, "-1", mqttClient)
+        return
+
+    # Otherwise we have a gps signal, so get the coordinates and send to topic
+    coordinates = gps.coordinates()
+    sendMQTTMessage(ConfigMqtt.TOPIC_GPS, coordinates, mqttClient)
+    input("Press any key to continue....")  #TODO - remove
+
+    # If we want to monitor with motion (send multiple gps coordinates as long as there is motion), start monitoring
+    while bWithMotion & accelInMotion():
+        # Go to sleep for a specified amount of time (keeping GPS alive) to conserve some battery
+        # TODO - check if this is better than setPeriodicMode
+        printDebug("Putting gps in low power and going to sleep")
+        py.setup_sleep(ConfigGPS.SLEEP_BETWEEN_READS)
+        py.go_to_sleep(gps=False)
 
 
 def accelInMotion(numReads=5):
-    # Takes numReads measurements of accelerometer data to detect if there is motion.
-    # Returns true if delta sensor data is above a threshold (meaning there is active motion), flase otherwise
-
+    '''
+    Takes numReads measurements of accelerometer data to detect if there is motion.
+    numReads - Number of measurements to take to detect motion
+    Returns true if delta sensor data is above a threshold (meaning there is active motion), false otherwise
+    '''
     xyzList = list()
     xyzList.append(accel.acceleration())
     for index in range(0, numReads):
@@ -131,8 +185,11 @@ def accelInMotion(numReads=5):
 
 
 def accelWakeup(mqttClient=None):
-    # Logic to handle board wakeup interruption due to accelerometer.
-    # Sends mqtt messages for wakeup if client is defined
+    '''
+    Logic to handle board wakeup interruption due to accelerometer.
+    Sends mqtt messages for wakeup if client is defined
+    '''
+
     print("Accelerometer wakeup")
 
     # Check the accelerometer is still active (preventing false negatives for alerting of theft)
@@ -148,9 +205,8 @@ def accelWakeup(mqttClient=None):
 
 
 def main():
-    mqttClient = None
     pycom.heartbeat(False)
-    params = init(mqttClient)
+    params = init()
     mqttClient = params["mqttClient"]
     time.sleep(2)
 
@@ -171,7 +227,12 @@ def main():
     sleepWithInterrupt(mqttClient)
 
 
+def printDebug(str):
+    if debug:
+        print(str)
+
 # Run the main function implementation
 #main()
 
+# Test GPS 
 monitorLocation()

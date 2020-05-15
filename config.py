@@ -35,6 +35,7 @@ class ConfigMqtt:
     TOPIC_ACCEL_CONTINUOUS_MOTION = "/motorcycle/accelMotion"
     # Topic to send GPS coordinates 
     TOPIC_GPS = "/motorcycle/location"
+    TOPIC_GPS_NOT_AVAILABLE = "/motorcycle/locationunavailable"
 
 # Configurations for Accelerometer Settings
 class ConfigAccelerometer:
@@ -47,6 +48,7 @@ class ConfigAccelerometer:
 
 class ConfigGPS:
     # Sets the timeout for a GPS to get a lock on the location
-    LOCK_TIMEOUT = 60  # 60 seconds
+    LOCK_TIMEOUT = 180  # 3 minutes
     # Defines max number of attempts of trying to get a GPS lock and failing before stopping to try GPS connection
     LOCK_FAIL_ATTEMPTS = 5  # Try at least 5 times to aquire a GPS signal before exiting
+    SLEEP_BETWEEN_READS = 60  # If we are actively reading gps location, send every 60 seconds
