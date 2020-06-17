@@ -16,7 +16,6 @@
 # every lookup of coordinates or other GPS data has to wait for the
 # right GPS message, no caching of GPS data
 # MIT licence
-# https://github.com/andrethemac/L76GLNSV4
 
 from machine import Timer
 import time
@@ -352,7 +351,7 @@ class L76GNSS:
             COG = msg['COG-T']
         return dict(speed=speed, COG=COG)
 
-    def get_location(self, MSL=False, debug=False):
+    def get_location(self, MSL=False,debug=False):
         """location, altitude and HDOP"""
         msg, latitude, longitude, HDOP, altitude = None, None, None, None, None
         if not self.fix:
@@ -374,7 +373,8 @@ class L76GNSS:
         if msg is not None:
             utc_time = msg['UTCTime']
             return "{}:{}:{}".format(utc_time[0:2], utc_time[2:4], utc_time[4:6])
-        return None
+        else:
+            return None
 
     def getUTCDateTime(self, debug=False):
         """return UTC date time or None when nothing if found"""
@@ -386,7 +386,8 @@ class L76GNSS:
                 return None
             return "20{}-{}-{}T{}:{}:{}+00:00".format(utc_date[4:6], utc_date[2:4], utc_date[0:2],
                                                       utc_time[0:2], utc_time[2:4], utc_time[4:6])
-        return None
+        else:
+            return None
 
     def getUTCDateTimeTuple(self, debug=False):
         """return UTC date time or None when nothing if found"""
@@ -401,7 +402,8 @@ class L76GNSS:
             year = '20'
             year += utc_date[4:6]
             return (int(year), int(utc_date[2:4]), int(utc_date[0:2]), int(utc_time[0:2]), int(utc_time[2:4]), int(utc_time[4:6]))
-        return None
+        else:
+            return None
 
     def _query_pmtk(self, message=None, checksum=None, returnmessage=None, timeout=5, tries=12, debug=False):
         """query the gps chip for pmtk messages"""
@@ -456,10 +458,10 @@ class L76GNSS:
         if checksum == checksum_calc:
             if debug:
                 print(checksum, "ok")
-            message = bytearray('${}*{}\r\n'.format(message, checksum))
+            message = bytearray('${}*{}\r\n'.format(message,checksum))
             self.i2c.writeto(GPS_I2CADDR, message)
-        elif debug:
-            print(checksum_calc, "<>", checksum)
+        else:
+            print(checksum_calc , "<>", checksum)
 
     def enterStandBy(self, debug=False):
         """ standby mode, needs powercycle to restart"""
@@ -511,11 +513,11 @@ class L76GNSS:
         secsleeptime: time the unit is in standy/backup modus if the first runtime doesn't get a fix
         """
         if mode in (0, 1, 2, 8, 9):
-            message = 'PMTK225,{},{},{},{},{}'.format(mode, runtime, sleeptime, secruntime, secsleeptime)
+            message = 'PMTK225,{},{},{},{},{}'.format(mode,runtime, sleeptime, secruntime, secsleeptime)
             checksum = self._get_checksum(message)
             message = bytearray('${}*{}\r\n'.format(message, checksum))
             if debug:
-                print("setPeriodicMode", message)
+                print("setPeriodicMode",message)
             self.i2c.writeto(GPS_I2CADDR, message)
         # return self._read_message(messagetype='001', debug=debug)
 
@@ -528,7 +530,7 @@ class L76GNSS:
             checksum = self._get_checksum(message)
             message = bytearray('${}*{}\r\n'.format(message, checksum))
             if debug:
-                print("setAlwaysLocateMode", message)
+                print("setAlwaysLocateMode",message)
             self.i2c.writeto(GPS_I2CADDR, message)
             return True
             # response = self._read_message(messagetype='001', debug=debug)

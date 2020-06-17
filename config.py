@@ -11,7 +11,7 @@ class ConfigNetwork:
     # Wifi Networks
     KNOWN_NETWORKS = {
         #config param - IP, Subnet, Gateway, DNS
-        'FiOS-DJ8NN': {'pwd': config_auth.NETWORK_1_PASS, 'config': ('192.168.1.185', '255.255.255.0', '192.168.1.1', '192.168.1.1')},
+        'TP-LINK_89F7': {'pwd': config_auth.NETWORK_1_PASS, 'config': ('192.168.0.185', '255.255.255.0', '192.168.0.1', '192.168.0.1')},
         'Nuthouse': {'pwd': config_auth.NETWORK_2_PASS}
     }
 
