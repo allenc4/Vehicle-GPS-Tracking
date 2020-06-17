@@ -40,11 +40,30 @@ def init():
         counter += 1
 
     # Initialize mqttClient
-    mqttClient = MQTTClient(ConfigMqtt.CLIENT_ID, ConfigMqtt.SERVER, ConfigMqtt.PORT, ConfigMqtt.USER, ConfigMqtt.PASSWORD)
-    mqttClient.connect()
+    mqttClient = _getMqttClient()
+
     return {
         "mqttClient": mqttClient
     }
+
+def _getMqttClient():
+    # Initialize mqttClient
+    state = False
+    count = 0
+    mqttClient = None
+
+    while not state and count < 5:
+        try:
+            import ussl
+            count += 1
+            mqttClient = MQTTClient(ConfigMqtt.CLIENT_ID, ConfigMqtt.SERVER, port=ConfigMqtt.PORT, user=ConfigMqtt.USER, password=ConfigMqtt.PASSWORD)
+            mqttClient.connect()
+            state = True
+        except Exception as e:
+            printDebug("Exception occurred trying to initialize mqtt client")
+            time.sleep(0.5)
+    return mqttClient
+
 
 def sendMQTTMessage(topic, msg, mqttClient=None):
     '''
@@ -53,26 +72,18 @@ def sendMQTTMessage(topic, msg, mqttClient=None):
     msg - Message to send to topic
     mqttClient - MQTT Client used to send the message. If not defined, sends to default configured mqtt client in configuration
     '''
+    if mqttClient is None:
+        # Instantiate a new MQTTClient
+        mqttClient = _getMqttClient()
+
     try:
-        if mqttClient is None:
-            # Instantiate a new MQTTClient
-            mqttClient = MQTTClient(ConfigMqtt.CLIENT_ID, ConfigMqtt.SERVER, ConfigMqtt.PORT, ConfigMqtt.USER, ConfigMqtt.PASSWORD)
-            mqttClient.connect()
+        # Instantiate a new MQTTClient
+        mqttClient = _getMqttClient()
 
-        # Publish the message to the topic
+        # Send the message topic
         mqttClient.publish(topic, msg)
-
     except:
-        # On exception, the client may have been initialized but connected. Try to connect one more time then exit
-        try:
-            # Instantiate a new MQTTClient
-            mqttClient = MQTTClient(ConfigMqtt.CLIENT_ID, ConfigMqtt.SERVER, ConfigMqtt.PORT, ConfigMqtt.USER, ConfigMqtt.PASSWORD)
-            mqttClient.connect()
-
-            # Send the message topic
-            mqttClient.publish(topic, msg)
-        except:
-            print("Exception occurred attempting to connect to MQTT server")
+        printDebug("Exception occurred attempting to connect to MQTT server")
 
 
 def sleepWithInterrupt(mqttClient=None):
@@ -114,14 +125,18 @@ def _getGpsFix(gps):
         signalFixTries -= 1
         gps.get_fix(debug=False)
         pycom.heartbeat(False)
+        bIsFixed = False
+
         if gps.fixed():
             # Got the GPS fix, exit out of this while condition
             pycom.rgbled(0x000f00)
-            return True
+            bIsFixed = True
         else:
             # If couldnt get a signal fix, try again
             pycom.rgbled(0x0f0000)
-    return False
+
+    return bIsFixed
+
 
 def monitorLocation(bWithMotion=True, mqttClient=None):
     '''
@@ -235,4 +250,4 @@ def printDebug(str):
 #main()
 
 # Test GPS 
-monitorLocation()
+#monitorLocation()
