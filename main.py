@@ -15,6 +15,11 @@ from LIS2HH12 import LIS2HH12
 from lib.L76GNSV4 import L76GNSS
 from pytrack import Pytrack
 
+# todo remove
+import gc
+from machine import RTC
+import utime
+
 # Declare global variables and instantiate various modules
 py = Pytrack()
 accel = LIS2HH12()
@@ -246,8 +251,36 @@ def printDebug(str):
     if debug:
         print(str)
 
+def monitorAccel():
+    while True:
+        printDebug("{}, {}".format(accel.roll(), accel.pitch()))
+        time.sleep(1)
+
+def testGps():
+    # setup rtc
+    rtc = machine.RTC()
+    rtc.ntp_sync("pool.ntp.org")
+    utime.sleep_ms(750)
+    print('\nRTC Set from NTP to UTC:', rtc.now())
+    utime.timezone(7200)
+    print('Adjusted from UTC to EST timezone', utime.localtime(), '\n')
+
+    gps = L76GNSS(py, debug=True)
+    gps.setAlwaysOn()
+    printDebug("GPS Version: {}".format(gps.get_chip_version()))
+    gps.fullColdStart()
+    gps.get_fix(force=True, debug=True, timeout=30)
+    
+    while True:
+        print("{} - {} - {}".format(gps.get_location(debug=True), rtc.now(), gc.mem_free()))
+
 # Run the main function implementation
+gc.enable()
 #main()
 
 # Test GPS 
+testGps()
 #monitorLocation()
+
+#monitorAccel()
+

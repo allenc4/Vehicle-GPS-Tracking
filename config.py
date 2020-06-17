@@ -12,7 +12,7 @@ class ConfigNetwork:
     # Wifi Networks
     KNOWN_NETWORKS = {
         #config param - IP, Subnet, Gateway, DNS
-        'Accio Internet': {'pwd': config_auth.NETWORK_1_PASS, 'config': ('10.0.0.23', '255.255.255.0', '10.0.0.1', '10.0.0.1')},
+        'TP-LINK_89F7': {'pwd': config_auth.NETWORK_1_PASS, 'config': ('192.168.0.185', '255.255.255.0', '192.168.0.1', '192.168.0.1')},
         'Nuthouse': {'pwd': config_auth.NETWORK_2_PASS}
     }
 
