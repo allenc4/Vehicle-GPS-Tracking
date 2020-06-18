@@ -1,4 +1,5 @@
 # exclude config.py file (as it contains authentication info)
 config_auth.py
-.vscode\settings.json
+.vscode
 .DS_Store
+.mypy_cache

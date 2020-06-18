@@ -2,24 +2,24 @@
     "python.linting.enabled": true,
     "python.jediEnabled": false,
     "python.autoComplete.extraPaths": [
-        ".micropy/BradenM-micropy-stubs-9569403/frozen",
-        ".micropy/BradenM-micropy-stubs-27ee48a/frozen",
-        ".micropy/BradenM-micropy-stubs-9569403/stubs",
-        ".micropy/gps_tracker"
+        ".micropy\\BradenM-micropy-stubs-9569403\\frozen",
+        ".micropy\\BradenM-micropy-stubs-27ee48a\\frozen",
+        ".micropy\\BradenM-micropy-stubs-9569403\\stubs",
+        ".micropy\\gps_tracker"
     ],
     "python.autoComplete.typeshedPaths": [
-        ".micropy/BradenM-micropy-stubs-9569403/frozen",
-        ".micropy/BradenM-micropy-stubs-27ee48a/frozen",
-        ".micropy/BradenM-micropy-stubs-9569403/stubs",
-        ".micropy/gps_tracker"
+        ".micropy\\BradenM-micropy-stubs-9569403\\frozen",
+        ".micropy\\BradenM-micropy-stubs-27ee48a\\frozen",
+        ".micropy\\BradenM-micropy-stubs-9569403\\stubs",
+        ".micropy\\gps_tracker"
     ],
     "python.analysis.typeshedPaths": [
-        ".micropy/BradenM-micropy-stubs-9569403/frozen",
-        ".micropy/BradenM-micropy-stubs-27ee48a/frozen",
-        ".micropy/BradenM-micropy-stubs-9569403/stubs",
-        ".micropy/gps_tracker"
+        ".micropy\\BradenM-micropy-stubs-9569403\\frozen",
+        ".micropy\\BradenM-micropy-stubs-27ee48a\\frozen",
+        ".micropy\\BradenM-micropy-stubs-9569403\\stubs",
+        ".micropy\\gps_tracker"
     ],
     "python.linting.pylintEnabled": true,
-    "python.pythonPath": "/usr/local/bin/python3",
-    "python.linting.mypyEnabled": false
+    "python.pythonPath": "C:\\Users\\callen\\AppData\\Local\\Programs\\Python\\Python37\\python.exe",
+    "python.linting.mypyEnabled": true
 }
