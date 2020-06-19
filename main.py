@@ -27,7 +27,7 @@ class Tracker:
         self.accel = LIS2HH12()
         self.wlan = WLAN()  #TODO change to LTE
         self.gps = None
-        self.mqtt = None
+        self.mqttClient = None
         self.continueGPSRead = False
 
     def init(self):
@@ -46,13 +46,17 @@ class Tracker:
             counter += 1
 
         # Initialize mqttClient
-        self.mqttClient = _getMqttClient(self.debug)
+        self.mqttClient = self._getMqttClient(self.debug)
 
         # Check to see if we are in continued gps read (went to sleep and want to continue reading GPS data)
-        if self.pycom.nvs_get(ConfigGPS.SLEEP_CONTINUE_GPS_READ) == 1:
-            self.continueGPSRead = True
-        # Erase this key from NVS
-        self.pycom.nvs_erase(ConfigGPS.SLEEP_CONTINUE_GPS_READ)
+        try:
+            if pycom.nvs_get(ConfigGPS.SLEEP_CONTINUE_GPS_READ) == 1:
+                self.continueGPSRead = True
+                # Erase this key from NVS
+                pycom.nvs_erase(ConfigGPS.SLEEP_CONTINUE_GPS_READ)
+        except Exception as e:
+            if self.debug:
+                print("NVS error: {}".format(e))
 
     @staticmethod
     def _getMqttClient(debug):
@@ -63,14 +67,13 @@ class Tracker:
 
         while not state and count < 5:
             try:
-                import ussl
                 count += 1
                 mqttClient = MQTTClient(ConfigMqtt.CLIENT_ID, ConfigMqtt.SERVER, port=ConfigMqtt.PORT, user=ConfigMqtt.USER, password=ConfigMqtt.PASSWORD)
                 mqttClient.connect()
                 state = True
             except Exception as e:
                 if debug:
-                    print("Exception occurred trying to initialize mqtt client")
+                    print("Exception on initialize mqtt client: {}".format(e))
                 time.sleep(0.5)
         return mqttClient
 
@@ -87,14 +90,14 @@ class Tracker:
         if self.mqttClient is None:
             try:
                 # Instantiate a new MQTTClient
-                self.mqttClient = _getMqttClient(debug)
+                self.mqttClient = self._getMqttClient(debug)
             except:
                 self.mqttClient = None
         
         try:
             if self.mqttClient is not None:
                 # Send the message topic
-                mqttClient.publish(topic, msg)
+                self.mqttClient.publish(topic=topic, msg=msg)
         except:
             if debug:
                 print("Exception occurred attempting to connect to MQTT server")
@@ -148,17 +151,19 @@ class Tracker:
             signalFixTries -= 1
             if self.debug:
                 print("On GPS fix try number {} of {}".format(maxTries - signalFixTries, maxTries))
-            self.gps.get_fix(debug=False)
+            self.gps.get_fix(debug=True)
             pycom.heartbeat(False)
             bIsFixed = False
 
             if self.gps.fixed():
                 # Got the GPS fix, exit out of this while condition
-                pycom.rgbled(0x000f00)
+                if self.debug:
+                    pycom.rgbled(0x000f00)
                 bIsFixed = True
             else:
                 # If couldnt get a signal fix, try again
-                pycom.rgbled(0x0f0000)
+                if self.debug:
+                    pycom.rgbled(0x0f0000)
 
         return bIsFixed
 
@@ -174,7 +179,7 @@ class Tracker:
         self.gps = L76GNSS(self.pytrack, timeout=ConfigGPS.LOCK_TIMEOUT, debug=False)
         self.gps.setAlwaysOn()
 
-        if not self._getGpsFix(self.gps):
+        if not self._getGpsFix():
             # Couldnt get a signal so send message to topic for gps not available and exit (go back to sleep)
             if self.debug:
                 print("Couldnt get a GPS signal after {} attempts".format(ConfigGPS.LOCK_FAIL_ATTEMPTS))
@@ -190,7 +195,7 @@ class Tracker:
         if bWithMotion & self.accelInMotion():
             # Go to sleep for a specified amount of time (keeping GPS alive) to conserve some battery
             # TODO - check if this is better than setPeriodicMode
-            if debug:
+            if self.debug:
                 print("Putting gps in low power and going to sleep")
             #Save state to nvs (non volatile storage)
             pycom.nvs_set(ConfigGPS.SLEEP_CONTINUE_GPS_READ, 1)
@@ -198,7 +203,7 @@ class Tracker:
             self.pytrack.go_to_sleep(gps=False)
 
 
-    def accelInMotion(self, numReads=5):
+    def accelInMotion(self, numReads=10):
         '''
         Takes numReads measurements of accelerometer data to detect if there is motion.
         numReads - Number of measurements to take to detect motion
@@ -225,6 +230,8 @@ class Tracker:
 
         # Get the maximum delta for x, y, z for all logged points
         deltas = list(map(lambda b, a: b - a, maxVals, minVals))
+        if self.debug:
+            print("Deltas accel motion {}".format(deltas))
         # If any x, y, or z axis in deltas array have a total delta change past the allowed threshold, return true. Otherwise return false
         return max(deltas) >= ConfigAccelerometer.MOTION_CHECK_MIN_THRESHOLD
 
@@ -234,13 +241,19 @@ class Tracker:
         Logic to handle board wakeup interruption due to accelerometer.
         Sends mqtt messages for wakeup if client is defined
         '''
-        if self.debug:
+        debug = self.debug
+        if debug:
             print("Accelerometer wakeup")
 
         # Check the accelerometer is still active (preventing false negatives for alerting of theft)
         # If we dont ready any new accelerometer motion, exit this function and dont send any accelerometer wakeup or gps msgs
         if not self.accelInMotion():
+            if debug:
+                print("Not currently in motion, going back to sleep")
             return
+        else:
+            if debug:
+                print("Motion detected after wakeup...")
 
         # Not a false wakeup, so send a message to the initial accelerometer wakeup topic
         self.sendMQTTMessage(ConfigMqtt.TOPIC_ACCEL_WAKEUP, "1")
@@ -268,19 +281,21 @@ def main(debug=False):
 
             if py.get_wake_reason() == WAKE_REASON_ACCELEROMETER:
                 # Wakeup was triggered by accelerometer interrupt
-                pycom.rgbled(0xFF0000) #red
+                if debug:
+                    pycom.rgbled(0xFF0000) #red
                 # Call accelerometer wakeup method to invoke GPS tracking and continuous location updates to mqtt server
                 tracker.accelWakeup()
             else:
                 # Wakeup call was not triggered from accelerometer interrupt, rather the timer just running out
-                pycom.rgbled(0x7f7f00) #yellow
-        
+                if debug:
+                    pycom.rgbled(0x7f7f00) #yellow
+
     except Exception as e:
         if debug:
             print("Exception in main thread '{}'".format(e))
 
         # Attempt to send mqtt message with exception
-        try :
+        try:
             tracker.sendMQTTMessage(ConfigMqtt.TOPIC_EXCEPTION_ENCOUNTERED, e)
         except:
             if debug:

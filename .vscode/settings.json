@@ -20,6 +20,6 @@
         ".micropy\\gps_tracker"
     ],
     "python.linting.pylintEnabled": true,
-    "python.pythonPath": "C:\\Users\\callen\\AppData\\Local\\Programs\\Python\\Python37\\python.exe",
+    "python.pythonPath": "/usr/local/bin/python3",
     "python.linting.mypyEnabled": true
 }

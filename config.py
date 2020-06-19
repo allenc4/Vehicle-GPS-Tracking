@@ -51,7 +51,7 @@ class ConfigAccelerometer:
 
 class ConfigGPS:
     # Sets the timeout for a GPS to get a lock on the location
-    LOCK_TIMEOUT = 180  # 3 minutes
+    LOCK_TIMEOUT = 360  # 10 minutes
     # Defines max number of attempts of trying to get a GPS lock and failing before stopping to try GPS connection
     LOCK_FAIL_ATTEMPTS = 2  # Try at least 2 times to aquire a GPS signal before exiting
     SLEEP_BETWEEN_READS = 60  # If we are actively reading gps location, send every 60 seconds
