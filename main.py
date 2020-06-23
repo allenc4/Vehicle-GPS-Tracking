@@ -4,11 +4,12 @@
 #
 
 import time
+import utime
 import machine
 import pycom
 from lib.mqtt import MQTTClient
 from network import WLAN
-from config import ConfigMqtt, ConfigAccelerometer, ConfigGPS
+from config import ConfigMqtt, ConfigAccelerometer, ConfigGPS, ConfigWakeup
 from lib.pycoproc import WAKE_REASON_ACCELEROMETER
 from lib.LIS2HH12 import LIS2HH12
 #from L76GNSS import L76GNSS
@@ -23,12 +24,16 @@ class Tracker:
             self.pytrack = Pytrack()
 
         self.debug = debug
-        # Instantiate accelerometer
+        # Instantiate and hold state for sensors (accelerometer, lte, gps, etc)
         self.accel = LIS2HH12()
         self.wlan = WLAN()  #TODO change to LTE
         self.gps = None
+        # Holds the mqtt client to send messages to
         self.mqttClient = None
+        # If after wakeup, we are in continuous GPS logging state
         self.continueGPSRead = False
+        # Flag for handling wakeup and logging logic differently if owner is nearby
+        self.checkOwnerNearby = True
 
     def init(self):
         '''
@@ -49,14 +54,37 @@ class Tracker:
         self.mqttClient = self._getMqttClient(self.debug)
 
         # Check to see if we are in continued gps read (went to sleep and want to continue reading GPS data)
+        if self._getNVS(ConfigGPS.NVS_SLEEP_CONTINUE_GPS_READ) is not None:
+            self.continueGPSRead = True
+            # Erase this key from NVS
+            pycom.nvs_erase(ConfigGPS.NVS_SLEEP_CONTINUE_GPS_READ)
+
+    @staticmethod
+    def _getRTC():
+        '''
+        Syncs the real time clock with latest time and returns RTC instance
+        '''
+        rtc = machine.RTC()
+        if not rtc.synced():
+            # Sync real time clock
+            rtc.ntp_sync("pool.ntp.org")
+        return rtc
+
+
+    @staticmethod
+    def _getNVS(key):
+        '''
+        Looks up at the non volatile storage for a specified key. If it exists, returns the value stored
+        for that key. Otherwise, returns None
+        '''
         try:
-            if pycom.nvs_get(ConfigGPS.SLEEP_CONTINUE_GPS_READ) == 1:
-                self.continueGPSRead = True
-                # Erase this key from NVS
-                pycom.nvs_erase(ConfigGPS.SLEEP_CONTINUE_GPS_READ)
-        except Exception as e:
-            if self.debug:
-                print("NVS error: {}".format(e))
+            if pycom.nvs_get(key) is not None:
+                return pycom.nvs_get(key)
+        except Exception:
+            # Do nothing, key doesnt exist
+            pass
+        return None
+
 
     @staticmethod
     def _getMqttClient(debug):
@@ -76,6 +104,59 @@ class Tracker:
                     print("Exception on initialize mqtt client: {}".format(e))
                 time.sleep(0.5)
         return mqttClient
+
+    def isContinueGPSRead(self):
+        '''
+        Returns true or false - whether or not we are in a continued gps read state after power cycle / deep sleep.
+        If true, we should jump right to gps read. False if we should execute normal wakeup flow
+        '''
+        return self.continueGPSRead
+
+    def getWakeReason(self):
+        '''
+        Returns the reason why the device was woken up.
+        Return values are from the ConfigWakeup scope
+        '''
+        if self.continueGPSRead:
+            return ConfigWakeup.WAKE_CONTINUE_GPS
+        elif self.pytrack.get_wake_reason() == WAKE_REASON_ACCELEROMETER:
+            return ConfigWakeup.WAKE_REASON_ACCELEROMATER
+        else:
+            return ConfigWakeup.WAKE_REASON_TIMEOUT
+
+
+    def setCheckOwnerNearby(self, bOwnerNearby=True):
+        '''
+        If bOnwerNearby is set to true (defaults to true here and constructor instantiation), we handle
+        logic for wakup and actively logging location and pushing mqtt messages differently.
+        If checkowner flag is true and owner is detected nearby on device wakeup, we are much less active
+        in wakeups and monitoring
+        '''
+        self.checkOwnerNearby = bOwnerNearby
+
+    def isOwnerNearby(self):
+        #TODO implement bluetooth logic here to check for owner device if broadcasting
+        # If they are, return true. Else, return false
+        return False
+
+    def handleOwnerNearby(self):
+        '''
+        If owner is determined to be nearby, determines if owner is using vehicle.
+        If so, puts device in deep sleep for specified amount of time, without acceleration wakeup
+        '''
+        # Get last time we wokeup when owner was nearby
+        lastOwnerWakupTime = self._getNVS(ConfigWakeup.NVS_OWNER_WAKEUP_LAST_TIME)
+        self._getRTC()
+        curTime = utime.time()
+        # Compare current time with last owner wakeup time
+        if lastOwnerWakupTime is not None and (curTime - lastOwnerWakupTime <= ConfigWakeup.MULTIPLE_OWNER_WAKEUP_THRESHOLD):
+            # Current time and last time we wokeup with owner nearby was less than 2 minutes apart.
+            # Go to deep sleep for specified amount of time without accelerometer wakeup
+            self.pytrack.setup_sleep(ConfigWakeup.SLEEP_TIME_OWNER_NEARBY)
+            self.pytrack.go_to_sleep()
+        
+        # Otherwise if we arent going to sleep, update time in NVS 
+        pycom.nvs_set(ConfigWakeup.NVS_OWNER_WAKEUP_LAST_TIME, curTime)
 
 
     def sendMQTTMessage(self, topic, msg):
@@ -102,12 +183,6 @@ class Tracker:
             if debug:
                 print("Exception occurred attempting to connect to MQTT server")
 
-    def isContinueGPSRead(self):
-        '''
-        Returns true or false - whether or not we are in a continued gps read state after power cycle / deep sleep.
-        If true, we should jump right to gps read. False if we should execute normal wakeup flow
-        '''
-        return self.continueGPSRead
 
     def sleepWithInterrupt(self, sleepGps=True):
         '''
@@ -191,6 +266,10 @@ class Tracker:
         self.sendMQTTMessage(ConfigMqtt.TOPIC_GPS, coordinates)
         input("Press any key to continue monitoring location with motion....")  #TODO - remove
 
+        # Save current timestamp of log time
+        self._getRTC()  # Syncs rtc
+        pycom.nvs_set(ConfigGPS.NVS_LAST_LOCATION_LOG_TIME, utime.time())
+
         # If we want to monitor with motion (send multiple gps coordinates as long as there is motion), start monitoring
         if bWithMotion & self.accelInMotion():
             # Go to sleep for a specified amount of time (keeping GPS alive) to conserve some battery
@@ -198,7 +277,7 @@ class Tracker:
             if self.debug:
                 print("Putting gps in low power and going to sleep")
             #Save state to nvs (non volatile storage)
-            pycom.nvs_set(ConfigGPS.SLEEP_CONTINUE_GPS_READ, 1)
+            pycom.nvs_set(ConfigGPS.NVS_SLEEP_CONTINUE_GPS_READ, 1)
             self.pytrack.setup_sleep(ConfigGPS.SLEEP_BETWEEN_READS)
             self.pytrack.go_to_sleep(gps=False)
 
@@ -236,15 +315,34 @@ class Tracker:
         return max(deltas) >= ConfigAccelerometer.MOTION_CHECK_MIN_THRESHOLD
 
 
+    def logRegularCoordinates(self):
+        '''
+        On regular timed wakeups, we still log our location every so often. Check the last time the location was
+        logged and if the time is greater than the surpassed time defined in config, log coordinates again
+        '''
+        lastLogTime = self._getNVS(ConfigGPS.NVS_LAST_LOCATION_LOG_TIME)
+        self._getRTC()  # Updates RTC
+
+        # Compare the last log time with current rtc to see if threshold has passed
+        if (lastLogTime is None or (utime.time() - lastLogTime > ConfigGPS.LOCATION_LOG_INTERVAL)):
+            # Need to update gps as time has elapsed since last log
+            self.monitorLocation(bWithMotion=False)  # Only log once
+
     def accelWakeup(self):
         '''
         Logic to handle board wakeup interruption due to accelerometer.
-        Sends mqtt messages for wakeup if client is defined
+        Sends mqtt messages for wakeup if client is defined.
         '''
         debug = self.debug
         if debug:
             print("Accelerometer wakeup")
 
+        # Check if the owner is nearby (owner moving device). If so, handle differently
+        if self.checkOwnerNearby and self.isOwnerNearby():
+            # Owner is nearby. If last wake is with 2 minutes, we are most likely riding
+            # so go to sleep for longer time without wakeup
+            self.handleOwnerNearby()
+        
         # Check the accelerometer is still active (preventing false negatives for alerting of theft)
         # If we dont ready any new accelerometer motion, exit this function and dont send any accelerometer wakeup or gps msgs
         if not self.accelInMotion():
@@ -265,30 +363,35 @@ class Tracker:
 def main(debug=False):
     pycom.heartbeat(False)
     py = Pytrack()
-    
+
     #Initialize new instance of Tracker class and initialize
     tracker = Tracker(pytrack=py, debug=debug)
     tracker.init()
     time.sleep(2)
 
     try:
-        # If continueGPS is true, dont send another heartbeat. Jump right to the continue monitoring method
-        if tracker.isContinueGPSRead():
+        # Get the wakeup reason
+        wakeReason = tracker.getWakeReason()
+
+        # If continueGPS is true, dont send another heartbeat. Jump right to the continue monitoring service
+        if wakeReason == ConfigWakeup.WAKE_CONTINUE_GPS:
             tracker.monitorLocation(bWithMotion=True)
-        else:
+        elif wakeReason == ConfigWakeup.WAKE_REASON_ACCELEROMATER:
+            # Wakeup was triggered by accelerometer interrupt
+            if debug:
+                pycom.rgbled(0xFF0000) #red
             # Send mqtt message for heartbeat to let server know we are still connected and alive
             tracker.sendMQTTMessage(ConfigMqtt.TOPIC_HEARTBEAT, "1")
-
-            if py.get_wake_reason() == WAKE_REASON_ACCELEROMETER:
-                # Wakeup was triggered by accelerometer interrupt
-                if debug:
-                    pycom.rgbled(0xFF0000) #red
-                # Call accelerometer wakeup method to invoke GPS tracking and continuous location updates to mqtt server
-                tracker.accelWakeup()
-            else:
-                # Wakeup call was not triggered from accelerometer interrupt, rather the timer just running out
-                if debug:
-                    pycom.rgbled(0x7f7f00) #yellow
+            # Call accelerometer wakeup method to invoke GPS tracking and continuous location updates to mqtt server
+            tracker.accelWakeup()
+        else:
+            # Wakeup call was not triggered from accelerometer interrupt, rather the timer just running out
+            if debug:
+                pycom.rgbled(0x7f7f00) #yellow
+             # Send mqtt message for heartbeat to let server know we are still connected and alive
+            tracker.sendMQTTMessage(ConfigMqtt.TOPIC_HEARTBEAT, "1")
+            # Check if we need to log GPS coordinates again
+            tracker.logRegularCoordinates()
 
     except Exception as e:
         if debug:

@@ -55,4 +55,14 @@ class ConfigGPS:
     # Defines max number of attempts of trying to get a GPS lock and failing before stopping to try GPS connection
     LOCK_FAIL_ATTEMPTS = 2  # Try at least 2 times to aquire a GPS signal before exiting
     SLEEP_BETWEEN_READS = 60  # If we are actively reading gps location, send every 60 seconds
-    SLEEP_CONTINUE_GPS_READ = "sleepgpsread"  # Key to save to NVS for continuing to read GPS after deep sleep
+    NVS_SLEEP_CONTINUE_GPS_READ = "sleepgpsread"  # Key to save to NVS for continuing to read GPS after deep sleep
+    NVS_LAST_LOCATION_LOG_TIME = "locationlogts"  # Key to save to NVS the timestamp of the last time GPS coordinates were logged.
+    LOCATION_LOG_INTERVAL = 86400  # Log location at least once a day (in seconds)
+
+class ConfigWakeup:
+    WAKE_REASON_ACCELEROMATER = 100
+    WAKE_CONTINUE_GPS = 200
+    WAKE_REASON_TIMEOUT = 300
+    NVS_OWNER_WAKEUP_LAST_TIME = "ownerlastwakeupts"  # Key to save to NVS for the timestamp of the last time device was woken up with owner nearby
+    MULTIPLE_OWNER_WAKEUP_THRESHOLD = 120  # 120 seconds 
+    SLEEP_TIME_OWNER_NEARBY = 1200  # 20 minutes

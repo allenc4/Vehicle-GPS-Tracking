@@ -1,10 +1,27 @@
 from lib.pytrack import Pytrack
-from lib.L76GNSV4 import L76GNSS
-import machine, time
+import machine
+import time
+import utime
+import gc
 import pycom
+from network import Bluetooth
+import binascii
 
-def testGPS():
-    print("up")
+py = Pytrack()
+
+def testGPSLib1():
+    from lib.L76GNSS import L76GNSS
+    print("Testing GPS using pytrack L76GNSS library")
+    L76 = L76GNSS(pytrack=py)
+
+    while True:
+        coord = L76.coordinates()
+        print("Coordinates: {}, mem: {}".format(coord, gc.mem_free()))
+
+
+def testGPSLib2():
+    from lib.L76GNSV4 import L76GNSS
+    print("Testing GPS using L75GNSV4 library")
     py = Pytrack()
     L76 = L76GNSS(pytrack=py)
     L76.setAlwaysOn()
@@ -42,4 +59,40 @@ def testGPS():
     py.setup_sleep(60) # sleep 1 minute
     py.go_to_sleep(gps=True)
 
-testGPS()
+
+def testBluetooth():
+    bt = Bluetooth()
+    bt.start_scan(30)
+
+    while True:
+        adv = bt.get_adv()
+        if adv:
+            # try to get the complete name
+            print("BT Name: {}".format(bt.resolve_adv_data(adv.data, Bluetooth.ADV_NAME_CMPL)))
+
+            # try to get the manufacturer data (Apple's iBeacon data is sent here)
+            mfg_data = bt.resolve_adv_data(adv.data, Bluetooth.ADV_MANUFACTURER_DATA)
+
+            if mfg_data:
+                # try to get the manufacturer data (Apple's iBeacon data is sent here)
+                print("MFG Data: {}".format(binascii.hexlify(mfg_data)))
+
+        else:
+            time.sleep(0.5)
+
+def testRTC():
+    time.sleep(2)
+    rtc = machine.RTC()
+    print('Current RTC: {}, is synced: {}', rtc.now(), rtc.synced())
+    rtc.ntp_sync("pool.ntp.org")
+    utime.sleep_ms(750)
+    print('Synced time: {}', rtc.now())
+    # print('Going to sleep')
+    # time.sleep(1);
+    # machine.idle()
+    # py.setup_sleep(10) # sleep 10 seconds
+    # py.go_to_sleep()
+
+
+
+testRTC()
