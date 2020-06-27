@@ -8,7 +8,7 @@ import utime
 import machine
 import pycom
 from lib.mqtt import MQTTClient
-from network import WLAN
+from network import LTE
 from config import ConfigMqtt, ConfigAccelerometer, ConfigGPS, ConfigWakeup
 from lib.pycoproc import WAKE_REASON_ACCELEROMETER
 from lib.LIS2HH12 import LIS2HH12
@@ -26,7 +26,7 @@ class Tracker:
         self.debug = debug
         # Instantiate and hold state for sensors (accelerometer, lte, gps, etc)
         self.accel = LIS2HH12()
-        self.wlan = WLAN()  #TODO change to LTE
+        self.lte = LTE()
         self.gps = None
         # Holds the mqtt client to send messages to
         self.mqttClient = None
@@ -35,20 +35,15 @@ class Tracker:
         # Flag for handling wakeup and logging logic differently if owner is nearby
         self.checkOwnerNearby = True
 
-    def init(self):
+    def init(self, bInitLTE=False):
         '''
         Initialize local variables used within the script. Checks for network connectivity. If not able to connect after
         a timeout, resets the machine in order to try and conenct again. 
         Initializes MQTTClient and checks if we are in a continuous GPS read state after wakeup (saved to self instance variables)
         '''
         # Check if network is connected. If not, attempt to connect
-        counter = 0
-        while not self.wlan.isconnected():
-            # If we surpass some counter timeout and network is still not connected, reset and attempt to connect again
-            if counter > 100000:
-                machine.reset()
-            machine.idle()
-            counter += 1
+        if bInitLTE:
+            self.initLTE()
 
         # Initialize mqttClient
         self.mqttClient = self._getMqttClient(self.debug)
@@ -104,6 +99,91 @@ class Tracker:
                     print("Exception on initialize mqtt client: {}".format(e))
                 time.sleep(0.5)
         return mqttClient
+
+    def initLTE(self):
+        '''
+        If already used, the lte device will have an active connection.
+        If not, need to set up a new connection.
+        '''
+        lte = self.lte
+        debug = self.debug
+
+        if lte.isconnected():
+            return
+
+        # Modem does not connect successfully without first being reset.
+        if debug:
+            print("Resetting LTE modem ... ", end='')
+        lte.send_at_cmd('AT^RESET')
+        if debug:
+            print("OK")
+        time.sleep(5)
+        lte.send_at_cmd('AT+CFUN=0')
+        time.sleep(5)
+
+        #send_at_cmd_pretty('AT!="fsm"')
+        # While the configuration of the CGDCONT register survives resets,
+        # the other configurations don't. So just set them all up every time.
+        if debug:
+            print("Configuring LTE ", end='')
+        lte.send_at_cmd('AT!="clearscanconfig"')
+        
+        if debug:
+            print(".", end='')
+        lte.send_at_cmd('AT!="RRC::addScanBand band=26"')
+        
+        if debug:
+            print(".", end='')
+        lte.send_at_cmd('AT!="RRC::addScanBand band=18"')
+        
+        if debug:
+            print(".", end='')
+        lte.send_at_cmd('AT+CGDCONT=1,"IP","soracom.io"')
+        
+        if debug:
+            print(".", end='')
+        lte.send_at_cmd('AT+CGAUTH=1,1,"sora","sora"')
+        print(".", end='')
+        
+        if debug:
+            lte.send_at_cmd('AT+CFUN=1')
+        print(" OK")
+
+        # If correctly configured for carrier network, attach() should succeed.
+        if not lte.isattached():
+            if debug:
+                print("Attaching to LTE network ", end='')
+            lte.attach()
+            
+            while True:
+                if lte.isattached():
+                    #send_at_cmd_pretty('AT+COPS?')
+                    time.sleep(5)
+                    break
+                
+                if debug:
+                    print('.', end='')
+                    pycom.rgbled(0x0f0000)
+                time.sleep(0.5)
+                if debug:
+                    pycom.rgbled(0x000000)
+                time.sleep(1.5)
+
+        # Once attached, connect() should succeed.
+        if not lte.isconnected():
+            if debug:
+                print("Connecting on LTE network ", end='')
+            lte.connect()
+            while True:
+                if lte.isconnected():
+                    break
+                if debug:
+                    print('.', end='')
+                time.sleep(1)
+
+        # Once connect() succeeds, any call requiring Internet access will
+        # use the active LTE connection.
+        self.lte = lte
 
     def isContinueGPSRead(self):
         '''
@@ -168,6 +248,9 @@ class Tracker:
         '''
         debug = self.debug
 
+        # If LTE is not setup, initialize it so we can send messages
+        self.initLTE()
+
         if self.mqttClient is None:
             try:
                 # Instantiate a new MQTTClient
@@ -184,19 +267,22 @@ class Tracker:
                 print("Exception occurred attempting to connect to MQTT server")
 
 
-    def sleepWithInterrupt(self, sleepGps=True):
+    def goToSleep(self, sleepTime=60, bWithInterrupt=False, bSleepGps=True):
         '''
-        Puts the py to deepsleep, enabling accelerometer and timer interrupt for wake. Puts GPS to sleep
-        by default (unless changed in params). This puts device in lowest power consumption mode
-        mqttClient - If defined, sends disconnect request
+        Puts the py to deepsleep, turning off lte in order to reduce battery consumption.
+        By default, sleeps for 60 seconds and powers down gps.
+        sleepTime - specifies the time (in seconds) to put the device in deep sleep before waking up
+        bWithInterrupt - if True, will wakeup for both timer timeout as well as acceleration interrupt
+        bSleepGps - If True, puts the gps in deepsleep state as well (will take longer to reinitialize and refix gps signal)
         '''
         # Enable wakeup source from INT pin
         self.pytrack.setup_int_pin_wake_up(False)
 
         # Enable activity and inactivity interrupts with acceleration threshold and min duration
-        self.pytrack.setup_int_wake_up(True, True)
-        self.accel.enable_activity_interrupt(
-            ConfigAccelerometer.INTERRUPT_THRESHOLD, ConfigAccelerometer.INTERRUPT_DURATION)
+        if bWithInterrupt:
+            self.pytrack.setup_int_wake_up(True, True)
+            self.accel.enable_activity_interrupt(
+                ConfigAccelerometer.INTERRUPT_THRESHOLD, ConfigAccelerometer.INTERRUPT_DURATION)
 
         # If mqttClient is defined, disconnect
         if self.mqttClient is not None:
@@ -206,11 +292,20 @@ class Tracker:
                 if self.debug:
                     print("Exception occurred disconnecting from mqtt client")
 
+        # Disconnect lte
+        if self.lte is not None and self.lte.isconnected():
+            try:
+                self.lte.disconnect()
+                time.sleep(1)
+                self.lte.dettach()
+            except:
+                if self.debug:
+                    print("Exception disconnecting from lte")
+
         # Go to sleep for specified amount of time if no accelerometer wakeup
-        #TODO config sleep time
         time.sleep(0.1)
-        self.pytrack.setup_sleep(60)
-        self.pytrack.go_to_sleep(gps=sleepGps)
+        self.pytrack.setup_sleep(sleepTime)
+        self.pytrack.go_to_sleep(gps=bSleepGps)
 
 
     def _getGpsFix(self):
@@ -264,7 +359,6 @@ class Tracker:
         # Otherwise we have a gps signal, so get the coordinates and send to topic
         coordinates = self.gps.coordinates()
         self.sendMQTTMessage(ConfigMqtt.TOPIC_GPS, coordinates)
-        input("Press any key to continue monitoring location with motion....")  #TODO - remove
 
         # Save current timestamp of log time
         self._getRTC()  # Syncs rtc
@@ -278,8 +372,7 @@ class Tracker:
                 print("Putting gps in low power and going to sleep")
             #Save state to nvs (non volatile storage)
             pycom.nvs_set(ConfigGPS.NVS_SLEEP_CONTINUE_GPS_READ, 1)
-            self.pytrack.setup_sleep(ConfigGPS.SLEEP_BETWEEN_READS)
-            self.pytrack.go_to_sleep(gps=False)
+            self.goToSleep(sleepTime=ConfigGPS.SLEEP_BETWEEN_READS, bWithInterrupt=False, bSleepGps=False)
 
 
     def accelInMotion(self, numReads=10):
@@ -380,8 +473,6 @@ def main(debug=False):
             # Wakeup was triggered by accelerometer interrupt
             if debug:
                 pycom.rgbled(0xFF0000) #red
-            # Send mqtt message for heartbeat to let server know we are still connected and alive
-            tracker.sendMQTTMessage(ConfigMqtt.TOPIC_HEARTBEAT, "1")
             # Call accelerometer wakeup method to invoke GPS tracking and continuous location updates to mqtt server
             tracker.accelWakeup()
         else:
@@ -407,16 +498,10 @@ def main(debug=False):
     time.sleep(5)
 
     # Go to deep sleep
-    tracker.sleepWithInterrupt()
+    # TODO configure sleep time
+    tracker.goToSleep(bWithInterrupt=True)
 
 
 
 # Run the main function implementation
-
 main(debug=True)
-
-# Test GPS 
-#monitorLocation()
-
-#monitorAccel()
-

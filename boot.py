@@ -11,7 +11,10 @@ from config import ConfigNetwork
 uart = machine.UART(0, baudrate=115200)
 os.dupterm(uart)
 
-if machine.reset_cause() != machine.SOFT_RESET:
+# Do not initialize any wireless settings
+useWifi = False
+
+if useWifi and machine.reset_cause() != machine.SOFT_RESET:
     from network import WLAN
     wl = WLAN()
     wl.mode(WLAN.STA)
@@ -45,4 +48,4 @@ if machine.reset_cause() != machine.SOFT_RESET:
         wl.init(mode=WLAN.AP, ssid=def_ssid, auth=def_auth, channel=6, antenna=WLAN.INT_ANT, hidden=False)
 
 #TODO For now going to tests module. Remove this
-machine.main('tests.py')
+#machine.main('tests.py')
