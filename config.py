@@ -39,6 +39,8 @@ class ConfigMqtt:
     TOPIC_GPS_NOT_AVAILABLE = "/motorcycle/locationunavailable"
     # Topic to send error info to
     TOPIC_EXCEPTION_ENCOUNTERED = "/motorcycle/exception"
+    # Topic to subscribe to for disabling the tracker
+    TOPIC_DISABLE_TRACKING = "/motorcycle/disableMonitor"
 
 # Configurations for Accelerometer Settings
 class ConfigAccelerometer:
@@ -66,3 +68,7 @@ class ConfigWakeup:
     NVS_OWNER_WAKEUP_LAST_TIME = "ownerlastwakeupts"  # Key to save to NVS for the timestamp of the last time device was woken up with owner nearby
     MULTIPLE_OWNER_WAKEUP_THRESHOLD = 120  # 120 seconds 
     SLEEP_TIME_OWNER_NEARBY = 1200  # 20 minutes
+
+class ConfigBluetooth:
+    SCAN_ALLOW_TIME = 10  # Allow 10 seconds to scan to see if owner is nearby (bluetooth tracker)
+    MAC_ADDR = config_auth.BLUETOOTH_MAC_ADDR

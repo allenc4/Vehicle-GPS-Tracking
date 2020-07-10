@@ -6,6 +6,7 @@ import gc
 import pycom
 from network import Bluetooth
 import binascii
+from config import ConfigBluetooth
 
 py = Pytrack()
 
@@ -60,9 +61,9 @@ def testGPSLib2():
     py.go_to_sleep(gps=True)
 
 
-def testBluetooth():
+def scanBluetooth():
     bt = Bluetooth()
-    bt.start_scan(30)
+    bt.start_scan(-1) # Start scanning indefinitely until stop_scan() is called
 
     while True:
         adv = bt.get_adv()
@@ -70,15 +71,37 @@ def testBluetooth():
             # try to get the complete name
             print("BT Name: {}".format(bt.resolve_adv_data(adv.data, Bluetooth.ADV_NAME_CMPL)))
 
-            # try to get the manufacturer data (Apple's iBeacon data is sent here)
-            mfg_data = bt.resolve_adv_data(adv.data, Bluetooth.ADV_MANUFACTURER_DATA)
-
-            if mfg_data:
-                # try to get the manufacturer data (Apple's iBeacon data is sent here)
-                print("MFG Data: {}".format(binascii.hexlify(mfg_data)))
+            # print out mac address of bluetooth device
+            print("Mac addr: {}, {}".format(adv.mac, binascii.hexlify(adv.mac)))
 
         else:
             time.sleep(0.5)
+        
+        time.sleep(3)
+
+def isBTDeviceNearby():
+    bt = Bluetooth()
+
+    while True:
+        print("Scanning for owner BT device nearby...")
+        bt.start_scan(10)  # Scans for 10 seconds
+
+        while bt.isscanning():
+            adv = bt.get_adv()
+            if adv and binascii.hexlify(adv.mac) == ConfigBluetooth.MAC_ADDR:
+                try:
+                    print("Owner device found: {} Mac addr {}".format(bt.resolve_adv_data(adv.data, Bluetooth.ADV_NAME_CMPL), ConfigBluetooth.MAC_ADDR))
+                    conn = bt.connect(adv.mac)
+                    time.sleep(0.05)
+                    conn.disconnect()
+                    bt.stop_scan()
+                except Exception as e:
+                    print("Exception {}".format(e))
+                    bt.stop_scan()
+                    break
+            else:
+                time.sleep(0.050)
+
 
 def testRTC():
     time.sleep(2)
@@ -95,4 +118,4 @@ def testRTC():
 
 
 
-testRTC()
+isBTDeviceNearby()

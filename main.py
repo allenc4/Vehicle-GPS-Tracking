@@ -7,9 +7,10 @@ import time
 import utime
 import machine
 import pycom
+import binascii
 from lib.mqtt import MQTTClient
-from network import LTE
-from config import ConfigMqtt, ConfigAccelerometer, ConfigGPS, ConfigWakeup
+from network import LTE, Bluetooth
+from config import ConfigMqtt, ConfigAccelerometer, ConfigGPS, ConfigWakeup, ConfigBluetooth
 from lib.pycoproc import WAKE_REASON_ACCELEROMETER
 from lib.LIS2HH12 import LIS2HH12
 #from L76GNSS import L76GNSS
@@ -127,24 +128,24 @@ class Tracker:
         if debug:
             print("Configuring LTE ", end='')
         lte.send_at_cmd('AT!="clearscanconfig"')
-        
+
         if debug:
             print(".", end='')
         lte.send_at_cmd('AT!="RRC::addScanBand band=26"')
-        
+
         if debug:
             print(".", end='')
         lte.send_at_cmd('AT!="RRC::addScanBand band=18"')
-        
+
         if debug:
             print(".", end='')
         lte.send_at_cmd('AT+CGDCONT=1,"IP","soracom.io"')
-        
+
         if debug:
             print(".", end='')
         lte.send_at_cmd('AT+CGAUTH=1,1,"sora","sora"')
         print(".", end='')
-        
+
         if debug:
             lte.send_at_cmd('AT+CFUN=1')
         print(" OK")
@@ -154,13 +155,13 @@ class Tracker:
             if debug:
                 print("Attaching to LTE network ", end='')
             lte.attach()
-            
+
             while True:
                 if lte.isattached():
                     #send_at_cmd_pretty('AT+COPS?')
                     time.sleep(5)
                     break
-                
+
                 if debug:
                     print('.', end='')
                     pycom.rgbled(0x0f0000)
@@ -215,8 +216,30 @@ class Tracker:
         self.checkOwnerNearby = bOwnerNearby
 
     def isOwnerNearby(self):
-        #TODO implement bluetooth logic here to check for owner device if broadcasting
-        # If they are, return true. Else, return false
+        '''
+        Logic here checks if a known BLE device is broadcasting nearby.
+        If they are, return true. Else, return false
+        '''
+        bt = Bluetooth()
+        bt.start_scan(ConfigBluetooth.SCAN_ALLOW_TIME)  # Scans for 10 seconds
+
+        while bt.isscanning():
+            adv = bt.get_adv()
+            if adv and binascii.hexlify(adv.mac) == ConfigBluetooth.MAC_ADDR:
+                try:
+                    if self.debug:
+                        print("Owner device found: {} Mac addr {}".format(bt.resolve_adv_data(adv.data, Bluetooth.ADV_NAME_CMPL), ConfigBluetooth.MAC_ADDR))
+                    conn = bt.connect(adv.mac)
+                    time.sleep(0.05)
+                    conn.disconnect()
+                    bt.stop_scan()
+                except Exception:
+                    bt.stop_scan()
+
+                return True
+
+            time.sleep(0.050)
+
         return False
 
     def handleOwnerNearby(self):
@@ -234,10 +257,18 @@ class Tracker:
             # Go to deep sleep for specified amount of time without accelerometer wakeup
             self.pytrack.setup_sleep(ConfigWakeup.SLEEP_TIME_OWNER_NEARBY)
             self.pytrack.go_to_sleep()
-        
+
         # Otherwise if we arent going to sleep, update time in NVS 
         pycom.nvs_set(ConfigWakeup.NVS_OWNER_WAKEUP_LAST_TIME, curTime)
 
+    def mqttCallback(self):
+        '''
+        Method to handle callbacks of any mqtt topics that we subscribe to.
+        For now, only subscribes to bypass topic which is used to disable gps monitoring and accelerometer wakeup detection.
+        '''
+        # Setup a subscription to mqtt topic to check for retained bypass messages
+
+        return False
 
     def sendMQTTMessage(self, topic, msg):
         '''
@@ -257,7 +288,7 @@ class Tracker:
                 self.mqttClient = self._getMqttClient(debug)
             except:
                 self.mqttClient = None
-        
+
         try:
             if self.mqttClient is not None:
                 # Send the message topic
@@ -313,7 +344,6 @@ class Tracker:
         Attempts to lock on a signal to the gps.
         Returns true if signal is found, false otherwise
         '''
-        input("Press any key to continue....")  #TODO - remove
         # Attempt to get the gps lock for X number of attempts (defined in config)
         maxTries = max(ConfigGPS.LOCK_FAIL_ATTEMPTS, 1)
         signalFixTries = maxTries
