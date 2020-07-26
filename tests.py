@@ -4,12 +4,28 @@ import time
 import utime
 import gc
 import pycom
-from network import Bluetooth
+from network import Bluetooth, WLAN
 import binascii
-from config import ConfigBluetooth
+from config import ConfigBluetooth, ConfigMqtt, ConfigAccelerometer
+from lib.mqtt import MQTTClient
+from lib.LIS2HH12 import LIS2HH12
+
+
 
 py = Pytrack()
+accel = LIS2HH12()
 
+def _decodeBytes(data):
+    '''
+    Attempts to decode a byte array to string format. If not a byte type,
+    just returns the original data
+    '''
+    try:
+        return data.decode()
+    except (UnicodeDecodeError, AttributeError):
+        pass
+    return data
+    
 def testGPSLib1():
     from lib.L76GNSS import L76GNSS
     print("Testing GPS using pytrack L76GNSS library")
@@ -116,6 +132,65 @@ def testRTC():
     # py.setup_sleep(10) # sleep 10 seconds
     # py.go_to_sleep()
 
+def testMQTT():
+    mqttClient = None
+    mqttClient = MQTTClient(ConfigMqtt.CLIENT_ID, ConfigMqtt.SERVER, port=ConfigMqtt.PORT, user=ConfigMqtt.USER, password=ConfigMqtt.PASSWORD)
+    # Set the callback method that will be invoked on subscription to topics
+    mqttClient.set_callback(mqttCallback)
+    mqttClient.connect()
+
+    #Subscribe to the disable tracking topic
+    mqttClient.subscribe(topic=ConfigMqtt.TOPIC_TRACKING_STATE)
+    time.sleep(0.5)
+    print("Checking MQTT messages")
+
+    mqttClient.check_msg()
+
+    print("Messages checked. Going to sleep")
+    time.sleep(15)
 
 
-isBTDeviceNearby()
+def mqttCallback(topic, msg):
+    '''
+    Method to handle callbacks of any mqtt topics that we subscribe to.
+    For now, only subscribes to bypass topic which is used to disable gps monitoring and accelerometer wakeup detection.
+    topic - MQTT topic that we are subscribing to and processing the request for 
+    msg - Message received from the topic
+    '''
+    print("In MQTT subscription callback")
+
+    # Attempt to decode the topic and msg if in byte format
+    topic = _decodeBytes(topic)
+    msg = _decodeBytes(msg)
+
+    print("{}: {}".format(topic, msg))
+
+def testCurrentDraw():
+    pycom.heartbeat(False)
+    for i in range(10):
+        pycom.rgbled(0x00FF00) #green
+        time.sleep(1)
+        pycom.rgbled(0x000000)
+        time.sleep(1)
+    
+    # Test deepsleep for 10 seconds with accelerometer wakeup
+    py.setup_int_wake_up(True, True)
+    accel.enable_activity_interrupt(
+                ConfigAccelerometer.INTERRUPT_THRESHOLD, ConfigAccelerometer.INTERRUPT_DURATION)
+    py.setup_sleep(10)
+    py.go_to_sleep()
+
+# Ensure we are connected to network
+# Check if network is connected. If not, attempt to connect
+counter = 0
+wlan = WLAN()
+while not wlan.isconnected():
+    # If we surpass some counter timeout and network is still not connected, reset and attempt to connect again
+    if counter > 100000:
+        machine.reset()
+    machine.idle()
+    counter += 1
+
+
+#isBTDeviceNearby()
+testCurrentDraw()

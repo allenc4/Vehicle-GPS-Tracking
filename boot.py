@@ -12,7 +12,7 @@ uart = machine.UART(0, baudrate=115200)
 os.dupterm(uart)
 
 # Do not initialize any wireless settings
-useWifi = False
+useWifi = True
 
 if useWifi and machine.reset_cause() != machine.SOFT_RESET:
     from network import WLAN

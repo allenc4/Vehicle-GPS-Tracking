@@ -8,8 +8,10 @@ import utime
 import machine
 import pycom
 import binascii
+import ujson
 from lib.mqtt import MQTTClient
 from network import LTE, Bluetooth
+from network import WLAN # TODO remove
 from config import ConfigMqtt, ConfigAccelerometer, ConfigGPS, ConfigWakeup, ConfigBluetooth
 from lib.pycoproc import WAKE_REASON_ACCELEROMETER
 from lib.LIS2HH12 import LIS2HH12
@@ -35,6 +37,7 @@ class Tracker:
         self.continueGPSRead = False
         # Flag for handling wakeup and logging logic differently if owner is nearby
         self.checkOwnerNearby = True
+        self.wlan = WLAN()  #TODO remove
 
     def init(self, bInitLTE=False):
         '''
@@ -45,6 +48,17 @@ class Tracker:
         # Check if network is connected. If not, attempt to connect
         if bInitLTE:
             self.initLTE()
+        else:
+            #TODO remove
+            # Check if network is connected. If not, attempt to connect
+            counter = 0
+            while not self.wlan.isconnected():
+                # If we surpass some counter timeout and network is still not connected, reset and attempt to connect again
+                if counter > 100000:
+                    machine.reset()
+                machine.idle()
+                counter += 1
+
 
         # Initialize mqttClient
         self.mqttClient = self._getMqttClient(self.debug)
@@ -81,9 +95,19 @@ class Tracker:
             pass
         return None
 
-
     @staticmethod
-    def _getMqttClient(debug):
+    def _decodeBytes(data):
+        '''
+        Attempts to decode a byte array to string format. If not a byte type,
+        just returns the original data
+        '''
+        try:
+            return data.decode()
+        except (UnicodeDecodeError, AttributeError):
+            pass
+        return data
+
+    def _getMqttClient(self, debug):
         # Initialize mqttClient
         state = False
         count = 0
@@ -93,15 +117,31 @@ class Tracker:
             try:
                 count += 1
                 mqttClient = MQTTClient(ConfigMqtt.CLIENT_ID, ConfigMqtt.SERVER, port=ConfigMqtt.PORT, user=ConfigMqtt.USER, password=ConfigMqtt.PASSWORD)
+                # Set the callback method that will be invoked on subscription to topics
+                mqttClient.set_callback(self.mqttCallback)
                 mqttClient.connect()
                 state = True
             except Exception as e:
                 if debug:
                     print("Exception on initialize mqtt client: {}".format(e))
                 time.sleep(0.5)
+        
+        #Subscribe to the disable tracking topic
+        mqttClient.subscribe(topic=ConfigMqtt.TOPIC_TRACKING_STATE)
+        time.sleep(0.5)
+        if self.debug:
+            print("Checking MQTT messages")
+
+        mqttClient.check_msg()
+
+        if self.debug:
+            print("Messages checked. Returning MQTT client")
+
         return mqttClient
 
     def initLTE(self):
+        #TODO remove
+        return
         '''
         If already used, the lte device will have an active connection.
         If not, need to set up a new connection.
@@ -220,6 +260,8 @@ class Tracker:
         Logic here checks if a known BLE device is broadcasting nearby.
         If they are, return true. Else, return false
         '''
+        # TODO remove
+        return False
         bt = Bluetooth()
         bt.start_scan(ConfigBluetooth.SCAN_ALLOW_TIME)  # Scans for 10 seconds
 
@@ -244,33 +286,69 @@ class Tracker:
 
     def handleOwnerNearby(self):
         '''
-        If owner is determined to be nearby, determines if owner is using vehicle.
-        If so, puts device in deep sleep for specified amount of time, without acceleration wakeup
+        If owner is determined to be nearby, puts device in deep sleep for specified amount
+        of time without acceleration wakeup
         '''
-        # Get last time we wokeup when owner was nearby
-        lastOwnerWakupTime = self._getNVS(ConfigWakeup.NVS_OWNER_WAKEUP_LAST_TIME)
-        self._getRTC()
-        curTime = utime.time()
-        # Compare current time with last owner wakeup time
-        if lastOwnerWakupTime is not None and (curTime - lastOwnerWakupTime <= ConfigWakeup.MULTIPLE_OWNER_WAKEUP_THRESHOLD):
-            # Current time and last time we wokeup with owner nearby was less than 2 minutes apart.
-            # Go to deep sleep for specified amount of time without accelerometer wakeup
-            self.pytrack.setup_sleep(ConfigWakeup.SLEEP_TIME_OWNER_NEARBY)
-            self.pytrack.go_to_sleep()
+        # Current time and last time we wokeup with owner nearby was less than 2 minutes apart.
+        # Go to deep sleep for specified amount of time without accelerometer wakeup
+        self.pytrack.setup_sleep(ConfigWakeup.SLEEP_TIME_OWNER_NEARBY)
+        self.pytrack.go_to_sleep()
 
-        # Otherwise if we arent going to sleep, update time in NVS 
-        pycom.nvs_set(ConfigWakeup.NVS_OWNER_WAKEUP_LAST_TIME, curTime)
-
-    def mqttCallback(self):
+    def mqttCallback(self, topic, msg):
         '''
         Method to handle callbacks of any mqtt topics that we subscribe to.
         For now, only subscribes to bypass topic which is used to disable gps monitoring and accelerometer wakeup detection.
+        topic - MQTT topic that we are subscribing to and processing the request for 
+        msg - Message received from the topic
         '''
-        # Setup a subscription to mqtt topic to check for retained bypass messages
+        if self.debug:
+            print("In MQTT subscription callback")
 
-        return False
+        # Attempt to decode the topic and msg if in byte format
+        topic = self._decodeBytes(topic)
+        msg = self._decodeBytes(msg)
 
-    def sendMQTTMessage(self, topic, msg):
+        # Handle mqtt topic for disabiling the monitoring
+        if topic == ConfigMqtt.TOPIC_TRACKING_STATE:
+            try:
+                bSleep = False
+                sleepTime = ConfigMqtt.SLEEP_TIME_MQTT_DISABLE
+
+                # First check if this is a plaintext msg (not json format)
+                if msg == ConfigMqtt.ENABLE_TRACKING_MSG:
+                    # Tracking is enabled, continue
+                    bSleep = False
+
+                elif msg == ConfigMqtt.DISABLE_TRACKING_MSG:
+                    # If tracking is disabled, go to sleep with configured sleep time
+                    bSleep = True
+
+                else:
+                    # Structure of the message will be in json format:
+                    # { msg: "XXX", "time": 123} where msg value is ON/OFF for disable (OFF) or enable(ON)
+                    # and time value is time to disable tracking (will automatically be re-enabled after
+                    # time surpasses if this value is present)
+                    jMsg = ujson.loads(msg)
+                    # Check if the msg is Y. If so, need to stop tracking
+                    if jMsg['msg'] == ConfigMqtt.DISABLE_TRACKING_MSG:
+                        # Requested to go to sleep, so set the flags
+                        bSleep = True
+                        # If theres a time with the disable flag, go to sleep for that amount of time
+                        if jMsg['time'] and jMsg['time'] is not None:
+                            sleepTime = jMsg['time']
+
+                # If the flag was set, go to sleep
+                if bSleep:
+                    if self.debug:
+                        print("Disable tracking from mqtt. Sleeping for {}".format(sleepTime))
+                    self.goToSleep(sleepTime=sleepTime)
+
+            except ValueError:
+                if self.debug:
+                    print('Exception parsing disable tracking mqtt msg')
+
+
+    def sendMQTTMessage(self, topic, msg, retain=False):
         '''
         Sends an MQTT message to the specified topic
         topic - Topic to send to
@@ -280,7 +358,7 @@ class Tracker:
         debug = self.debug
 
         # If LTE is not setup, initialize it so we can send messages
-        self.initLTE()
+        #self.initLTE()
 
         if self.mqttClient is None:
             try:
@@ -292,7 +370,7 @@ class Tracker:
         try:
             if self.mqttClient is not None:
                 # Send the message topic
-                self.mqttClient.publish(topic=topic, msg=msg)
+                self.mqttClient.publish(topic=topic, msg=msg, retain=retain)
         except:
             if debug:
                 print("Exception occurred attempting to connect to MQTT server")
@@ -334,6 +412,10 @@ class Tracker:
                     print("Exception disconnecting from lte")
 
         # Go to sleep for specified amount of time if no accelerometer wakeup
+        if self.debug:
+            print("Sleeping for {} seconds with accel interrupt? {}".format(sleepTime, bWithInterrupt))
+            time.sleep(0.5)
+
         time.sleep(0.1)
         self.pytrack.setup_sleep(sleepTime)
         self.pytrack.go_to_sleep(gps=bSleepGps)
@@ -351,7 +433,7 @@ class Tracker:
             signalFixTries -= 1
             if self.debug:
                 print("On GPS fix try number {} of {}".format(maxTries - signalFixTries, maxTries))
-            self.gps.get_fix(debug=True)
+            self.gps.get_fix(debug=False)
             pycom.heartbeat(False)
             bIsFixed = False
 
@@ -480,7 +562,7 @@ class Tracker:
         self.sendMQTTMessage(ConfigMqtt.TOPIC_ACCEL_WAKEUP, "1")
 
         # Send GPS updates while there has been continued motion for some time
-        self.monitorLocation(True)
+        self.monitorLocation(bWithMotion=True)
 
 
 def main(debug=False):
@@ -489,8 +571,7 @@ def main(debug=False):
 
     #Initialize new instance of Tracker class and initialize
     tracker = Tracker(pytrack=py, debug=debug)
-    tracker.init()
-    time.sleep(2)
+    tracker.init(bInitLTE=False)  #TODO change to True
 
     try:
         # Get the wakeup reason
@@ -525,11 +606,11 @@ def main(debug=False):
             if debug:
                 print("Exception sending MQTT message on main exception encountered")
 
-    time.sleep(5)
+    time.sleep(2)
 
     # Go to deep sleep
     # TODO configure sleep time
-    tracker.goToSleep(bWithInterrupt=True)
+    tracker.goToSleep(sleepTime=15, bWithInterrupt=True)
 
 
 

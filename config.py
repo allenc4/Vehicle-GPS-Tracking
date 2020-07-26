@@ -3,7 +3,6 @@
 #
 
 import config_auth
-import ussl
 
 _DEVICE_ID = "ChrisGpyMTrack001"
 
@@ -32,15 +31,16 @@ class ConfigMqtt:
     TOPIC_HEARTBEAT = "/motorcycle/heartbeat"
     # Topic to handle initial accelerometer wakeup interruption
     TOPIC_ACCEL_WAKEUP = "/motorcycle/accelWakeup"
-    # Topic to handle continuous accelerometer motion after initial accelerometer wakeup
-    TOPIC_ACCEL_CONTINUOUS_MOTION = "/motorcycle/accelMotion"
     # Topic to send GPS coordinates 
     TOPIC_GPS = "/motorcycle/location"
     TOPIC_GPS_NOT_AVAILABLE = "/motorcycle/locationunavailable"
     # Topic to send error info to
     TOPIC_EXCEPTION_ENCOUNTERED = "/motorcycle/exception"
     # Topic to subscribe to for disabling the tracker
-    TOPIC_DISABLE_TRACKING = "/motorcycle/disableMonitor"
+    TOPIC_TRACKING_STATE = "/motorcycle/monitorState"
+    DISABLE_TRACKING_MSG = "OFF"
+    ENABLE_TRACKING_MSG = "ON"
+    SLEEP_TIME_MQTT_DISABLE = 21600  # 6 hours default sleep time
 
 # Configurations for Accelerometer Settings
 class ConfigAccelerometer:
@@ -65,9 +65,7 @@ class ConfigWakeup:
     WAKE_REASON_ACCELEROMATER = 100
     WAKE_CONTINUE_GPS = 200
     WAKE_REASON_TIMEOUT = 300
-    NVS_OWNER_WAKEUP_LAST_TIME = "ownerlastwakeupts"  # Key to save to NVS for the timestamp of the last time device was woken up with owner nearby
-    MULTIPLE_OWNER_WAKEUP_THRESHOLD = 120  # 120 seconds 
-    SLEEP_TIME_OWNER_NEARBY = 1200  # 20 minutes
+    SLEEP_TIME_OWNER_NEARBY = 1800  # 30 minutes
 
 class ConfigBluetooth:
     SCAN_ALLOW_TIME = 10  # Allow 10 seconds to scan to see if owner is nearby (bluetooth tracker)
